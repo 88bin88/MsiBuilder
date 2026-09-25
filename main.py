@@ -339,6 +339,33 @@ class MsiBuilderApp(QMainWindow):
         self.tabs.addTab(tab_reg, "注册表")
         self.tabs.addTab(tab_chm, "CHM帮助")
 
+        # 第5页：捆绑包（WiX Burn，将多个MSI捆绑为一个exe安装器）
+        tab_bundle = QWidget()
+        layout_bundle = QVBoxLayout(tab_bundle)
+        btn_add_bundle_msi = QPushButton("添加要捆绑的MSI文件")
+        btn_add_bundle_msi.clicked.connect(self.add_bundle_msi)
+        btn_remove_bundle_msi = QPushButton("移除选中")
+        btn_remove_bundle_msi.clicked.connect(self.remove_bundle_msi)
+        bundle_btn_layout = QHBoxLayout()
+        bundle_btn_layout.addWidget(btn_add_bundle_msi)
+        bundle_btn_layout.addWidget(btn_remove_bundle_msi)
+        bundle_btn_layout.addStretch()
+        layout_bundle.addLayout(bundle_btn_layout)
+        self.list_bundle_msi = QListWidget()
+        layout_bundle.addWidget(QLabel("捆绑列表（安装时按顺序安装）:"))
+        layout_bundle.addWidget(self.list_bundle_msi)
+        btn_gen_bundle = QPushButton("生成捆绑安装包 (exe)")
+        btn_gen_bundle.setStyleSheet("font-size: 13px; padding: 6px; background-color: #2196F3; color: white;")
+        btn_gen_bundle.clicked.connect(self.generate_bundle)
+        layout_bundle.addWidget(btn_gen_bundle)
+
+        # 添加所有标签页
+        self.tabs.addTab(tab_info, "产品信息")
+        self.tabs.addTab(tab_files, "文件导入")
+        self.tabs.addTab(tab_reg, "注册表")
+        self.tabs.addTab(tab_chm, "CHM帮助")
+        self.tabs.addTab(tab_bundle, "捆绑包")
+
         # 底部：生成MSI按钮和日志
         btn_gen_msi = QPushButton("生成MSI安装包")
         btn_gen_msi.setStyleSheet("font-size: 14px; padding: 8px; background-color: #4CAF50; color: white;")
@@ -408,6 +435,83 @@ class MsiBuilderApp(QMainWindow):
             self.list_chm_pages.addItem(title)
             self.log(f"添加CHM页面: {title}")
 
+    def add_bundle_msi(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, "选择MSI文件", "", "MSI安装包 (*.msi)")
+        for p in paths:
+            item = QListWidgetItem(os.path.basename(p))
+            item.setData(Qt.ItemDataRole.UserRole, p)
+            self.list_bundle_msi.addItem(item)
+            self.log("添加捆绑MSI: " + p)
+
+    def remove_bundle_msi(self):
+        for item in self.list_bundle_msi.selectedItems():
+            self.list_bundle_msi.takeItem(self.list_bundle_msi.row(item))
+            self.log("已移除选中项")
+
+    def generate_bundle(self):
+        if self.list_bundle_msi.count() == 0:
+            QMessageBox.warning(self, "提示", "请先添加要捆绑的MSI文件")
+            return
+        save_path, _ = QFileDialog.getSaveFileName(self, "保存捆绑安装包", "setup_bundle.exe", "捆绑安装包 (*.exe)")
+        if not save_path:
+            return
+        bundle_path = Path(save_path)
+        work_dir = bundle_path.parent / (bundle_path.stem + "_bundle_build")
+        os.makedirs(work_dir, exist_ok=True)
+        msi_list = []
+        for i in range(self.list_bundle_msi.count()):
+            msi_list.append(self.list_bundle_msi.item(i).data(Qt.ItemDataRole.UserRole))
+        try:
+            self.log("===== 开始生成捆绑安装包 =====")
+            bundle_wxs = self._generate_bundle_wxs(msi_list)
+            wxs_path = work_dir / "bundle.wxs"
+            with open(wxs_path, "w", encoding="utf-8") as f:
+                f.write(bundle_wxs)
+            # 写入中文本地化文件，声明数据库代码页936，保证中文正确写入
+            wxl_path = work_dir / "zh-CN.wxl"
+            with open(wxl_path, "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="utf-8"?>\n'
+                        '<WixLocalization Culture="zh-CN" Codepage="936" '
+                        'xmlns="http://schemas.microsoft.com/wix/2006/localization">\n'
+                        '</WixLocalization>\n')
+            candle_exe = get_resource_path(os.path.join("wix", "candle.exe"))
+            light_exe = get_resource_path(os.path.join("wix", "light.exe"))
+            self.log("运行 candle 编译 bundle...")
+            candle_cmd = [candle_exe, str(wxs_path), "-o", str(work_dir) + "\\"]
+            ret = subprocess.run(candle_cmd, capture_output=True, text=True, cwd=str(work_dir))
+            self.log(ret.stdout)
+            if ret.returncode != 0:
+                raise RuntimeError("candle失败:\n" + ret.stderr)
+            wixobj_path = work_dir / "bundle.wixobj"
+            self.log("运行 light 链接 bundle...")
+            light_cmd = [light_exe, "-ext", "WixBalExtension", "-ext", "WixUtilExtension", "-loc", str(wxl_path), str(wixobj_path), "-o", str(bundle_path)]
+            ret2 = subprocess.run(light_cmd, capture_output=True, text=True, cwd=str(work_dir))
+            self.log(ret2.stdout)
+            if ret2.returncode != 0:
+                raise RuntimeError("light失败:\n" + ret2.stderr)
+            QMessageBox.information(self, "成功", "捆绑安装包生成完成！\n" + str(bundle_path))
+            self.log("===== 捆绑安装包生成成功 =====")
+        except Exception as e:
+            self.log("错误: " + str(e))
+            QMessageBox.critical(self, "生成失败", str(e))
+
+    def _generate_bundle_wxs(self, msi_list):
+        upgrade_code = str(uuid.uuid4()).upper()
+        msi_packages = ""
+        for msi in msi_list:
+            msi_packages += '      <MsiPackage SourceFile="' + msi + '" />\n'
+        wxs = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+               '<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"\n'
+               '     xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">\n'
+               '  <Bundle Name="' + self.edit_product_name.text() + ' 捆绑安装包" Version="' + self.edit_version.text() + '" Manufacturer="' + self.edit_manufacturer.text() + '" UpgradeCode="' + upgrade_code + '">\n'
+               '    <WixVariable Id="WixStdbaLicenseUrl" Value="https://example.com/license.html" />\n'
+               '    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.HyperlinkLicense" />\n'
+               '    <Chain>\n' + msi_packages +
+               '    </Chain>\n'
+               '  </Bundle>\n'
+               '</Wix>\n')
+        return wxs
+
     def generate_msi(self):
         save_path, _ = QFileDialog.getSaveFileName(self, "保存MSI", "output.msi", "MSI安装包 (*.msi)")
         if not save_path:
@@ -458,6 +562,13 @@ class MsiBuilderApp(QMainWindow):
             wxs_path = work_dir / "product.wxs"
             with open(wxs_path, 'w', encoding='utf-8') as f:
                 f.write(wxs_content)
+            # 写入中文本地化文件，声明数据库代码页936，保证中文正确写入
+            wxl_path = work_dir / "zh-CN.wxl"
+            with open(wxl_path, 'w', encoding='utf-8') as f:
+                f.write('<?xml version="1.0" encoding="utf-8"?>\n'
+                        '<WixLocalization Culture="zh-CN" Codepage="936" '
+                        'xmlns="http://schemas.microsoft.com/wix/2006/localization">\n'
+                        '</WixLocalization>\n')
 
             # 调用candle
             candle_exe = get_resource_path(os.path.join("wix", "candle.exe"))
@@ -478,7 +589,7 @@ class MsiBuilderApp(QMainWindow):
 
             wixobj_path = work_dir / "product.wixobj"
             self.log("运行 light 链接...")
-            light_cmd = [light_exe, str(wixobj_path), "-o", str(msi_path)]
+            light_cmd = [light_exe, "-ext", "WixUIExtension", "-loc", str(wxl_path), str(wixobj_path), "-o", str(msi_path)]
             ret2 = subprocess.run(light_cmd, capture_output=True, text=True, cwd=str(work_dir))
             self.log(ret2.stdout)
             if ret2.returncode != 0:
@@ -525,7 +636,7 @@ class MsiBuilderApp(QMainWindow):
 
         wxs = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="{product_code}" Name="{product_name}" Language="2052" Version="{version}" Manufacturer="{manufacturer}" UpgradeCode="{upgrade_code}">
+  <Product Id="{product_code}" Name="{product_name}" Language="2052" Version="{version}" Manufacturer="{manufacturer}" UpgradeCode="{upgrade_code}" Codepage="936">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
     <MajorUpgrade DowngradeErrorMessage="已安装更新版本的{product_name}。" />
     <MediaTemplate />

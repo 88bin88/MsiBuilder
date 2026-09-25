@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="中文产品" Language="2052" Version="1.0.0.0" Manufacturer="中文公司" UpgradeCode="11111111-2222-3333-4444-555555555555" Codepage="936">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <MediaTemplate />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="TestUI" />
+      </Directory>
+    </Directory>
+    <Feature Id="ProductFeature" Title="TestUI" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="cmp1" Guid="AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE">
+        <File Id="file1" Source="test.txt" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+    <UI>
+      <UIRef Id="WixUI_FeatureTree" />
+      <UIRef Id="WixUI_ErrorProgressText" />
+    </UI>
+  </Product>
+</Wix>
