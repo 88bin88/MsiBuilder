@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# 内嵌工具（版权原因不上传，使用者自行下载）
+wix/
+hhc/
+
+# 临时文件
+*.exe
+*.chm
+*.msi
+*.log
+test.reg
+htmlhelp.exe
+screenshot.png
+error*.png
+
+# 工程文件
+*.myproj
