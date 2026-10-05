@@ -523,19 +523,32 @@ class MsiBuilderApp(QMainWindow):
         try:
             self.save_current_chm_page()
             if not self.chm_builder.pages:
-                QMessageBox.information(self, "提示", "请先添加CHM页面")
+                QMessageBox.information(self, '提示', '请先添加CHM页面')
                 return
-            out_dir = os.path.join(tempfile.gettempdir(), "msibuilder_chm_test")
-            if os.path.exists(out_dir):
-                shutil.rmtree(out_dir, ignore_errors=True)
-            os.makedirs(out_dir, exist_ok=True)
-            chm_path = self.chm_builder.build_chm(out_dir, "help")
-            self.log(f"CHM编译成功: {chm_path}")
-            QMessageBox.information(self, "成功", f"CHM已编译完成:\n{chm_path}\n\n所在文件夹已打开，双击help.chm查看效果")
-            os.startfile(out_dir)
+            default_name = (self.edit_product_name.text().strip() or 'help') + '.chm'
+            desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
+            save_path, _ = QFileDialog.getSaveFileName(
+                self, '保存CHM帮助文档',
+                os.path.join(desktop, default_name),
+                'CHM帮助文件 (*.chm)')
+            if not save_path:
+                return
+            chm_path = Path(save_path)
+            work_dir = chm_path.parent / (chm_path.stem + '_chm_build')
+            if os.path.exists(work_dir):
+                shutil.rmtree(work_dir, ignore_errors=True)
+            os.makedirs(work_dir, exist_ok=True)
+            result_chm = self.chm_builder.build_chm(str(work_dir), chm_path.stem)
+            shutil.copy2(result_chm, str(chm_path))
+            self.log(f'CHM已保存: {chm_path}')
+            QMessageBox.information(
+                self, "成功",
+                "CHM已保存到:\n" + str(chm_path) + "\n\n双击即可打开查看效果。")
+            os.startfile(str(chm_path.parent))
         except Exception as e:
-            self.log(f"CHM编译失败: {str(e)}")
-            QMessageBox.warning(self, "编译失败", str(e))
+            self.log(f'CHM编译失败: {str(e)}')
+            QMessageBox.warning(self, '编译失败', str(e))
+
 
     def add_bundle_msi(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "选择MSI文件", "", "MSI安装包 (*.msi)")
