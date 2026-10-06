@@ -5,6 +5,7 @@ import subprocess
 import uuid
 import shutil
 import tempfile
+from xml.sax.saxutils import escape as xml_escape
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QPushButton,
                              QVBoxLayout, QHBoxLayout, QWidget, QLabel,
@@ -732,7 +733,7 @@ class MsiBuilderApp(QMainWindow):
             ret = subprocess.run(candle_cmd, capture_output=True, text=True, cwd=str(work_dir))
             self.log(ret.stdout)
             if ret.returncode != 0:
-                raise RuntimeError(f"candle失败:\n{ret.stderr}")
+                raise RuntimeError(f"candle失败:\nSTDOUT:\n{ret.stdout}\nSTDERR:\n{ret.stderr}")
 
             wixobj_path = work_dir / "product.wixobj"
             self.log("运行 light 链接...")
@@ -740,7 +741,7 @@ class MsiBuilderApp(QMainWindow):
             ret2 = subprocess.run(light_cmd, capture_output=True, text=True, cwd=str(work_dir))
             self.log(ret2.stdout)
             if ret2.returncode != 0:
-                raise RuntimeError(f"light失败:\n{ret2.stderr}")
+                raise RuntimeError(f"light失败:\nSTDOUT:\n{ret2.stdout}\nSTDERR:\n{ret2.stderr}")
 
             QMessageBox.information(self, "成功", f"MSI生成完成！\n{msi_path}")
             self.log("===== MSI生成成功 =====")
@@ -751,6 +752,10 @@ class MsiBuilderApp(QMainWindow):
 
     def _generate_wxs(self, product_name, version, manufacturer, product_code, upgrade_code, file_entries):
         """生成完整的WiX wxs文件"""
+        # 目录名清洗：Windows目录名不允许 \ ? | < > : / * " 等字符
+        dir_name = re.sub(r'[\\?|<>:"/\*&]', '', product_name).strip()
+        if not dir_name:
+            dir_name = "MyApp"
         # 生成文件组件
         component_xml = []
         component_refs = []
@@ -764,7 +769,7 @@ class MsiBuilderApp(QMainWindow):
                 # 简化：所有子目录都放在INSTALLFOLDER下
                 dir_ref = "INSTALLFOLDER"
             component_xml.append(f'''      <Component Id="{comp_id}" Guid="{str(uuid.uuid4())}">
-        <File Id="file{file_id}" Source="{src_path}" KeyPath="yes" />
+        <File Id="file{file_id}" Source="{xml_escape(src_path)}" KeyPath="yes" />
       </Component>''')
             component_refs.append(f"      <ComponentRef Id=\"{comp_id}\" />")
             file_id += 1
@@ -777,28 +782,30 @@ class MsiBuilderApp(QMainWindow):
         if self.banner_image_path and os.path.exists(self.banner_image_path):
             # WiX需要两个bmp：57x35 (InfoIcon) 和 493x58 (WixUI_Bmp_Banner)
             banner_xml = f'''
-    <WixVariable Id="WixUIBannerBmp" Value="{self.banner_image_path}" />
-    <WixVariable Id="WixUIDialogBmp" Value="{self.banner_image_path}" />
+    <WixVariable Id="WixUIBannerBmp" Value="{xml_escape(self.banner_image_path)}" />
+    <WixVariable Id="WixUIDialogBmp" Value="{xml_escape(self.banner_image_path)}" />
 '''
 
         license_xml = ""
         if self.edit_license.toPlainText().strip():
             license_xml = '\n    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />\n'
 
+        pn = xml_escape(product_name)
+        mf = xml_escape(manufacturer)
         wxs = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="{product_code}" Name="{product_name}" Language="2052" Version="{version}" Manufacturer="{manufacturer}" UpgradeCode="{upgrade_code}" Codepage="936">
+  <Product Id="{product_code}" Name="{pn}" Language="2052" Version="{version}" Manufacturer="{mf}" UpgradeCode="{upgrade_code}" Codepage="936">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
-    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的{product_name}。" />
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的{pn}。" />
     <MediaTemplate />
 {banner_xml}{license_xml}
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">
-        <Directory Id="INSTALLFOLDER" Name="{product_name}" />
+        <Directory Id="INSTALLFOLDER" Name="{xml_escape(dir_name)}" />
       </Directory>
     </Directory>
 
-    <Feature Id="ProductFeature" Title="{product_name}" Level="1">
+    <Feature Id="ProductFeature" Title="{pn}" Level="1">
 {chr(10).join(component_refs)}
     </Feature>
 

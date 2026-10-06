@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="d2867e10-67b1-4337-a530-389b6fd2ed5e" Name="测试 &amp; Demo &lt;软件&gt;" Language="2052" Version="1.0.0.0" Manufacturer="公司 &amp; Co." UpgradeCode="a99fa37d-c914-4308-9744-e9cc0936100c" Codepage="936">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的测试 &amp; Demo &lt;软件&gt;。" />
+    <MediaTemplate />
+
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="测试  Demo 软件" />
+      </Directory>
+    </Directory>
+
+    <Feature Id="ProductFeature" Title="测试 &amp; Demo &lt;软件&gt;" Level="1">
+      <ComponentRef Id="cmp1" />
+    </Feature>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="cmp1" Guid="3673aa1e-1cd2-44ef-8eba-880316d0cf82">
+        <File Id="file1" Source="D:\sb\MsiBuilder\test_build\my file &amp; demo.txt" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <UI>
+      <UIRef Id="WixUI_FeatureTree" />
+      <UIRef Id="WixUI_ErrorProgressText" />
+    </UI>
+  </Product>
+</Wix>
