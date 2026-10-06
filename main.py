@@ -172,12 +172,9 @@ class ChmBuilder:
         # 生成.hhp工程文件、html文件，并复制图片进工程目录
         os.makedirs(output_dir, exist_ok=True)
         for page in self.pages:
-            try:
-                with open(os.path.join(output_dir, page['filename']), 'w', encoding='gbk', errors='replace') as f:
-                    f.write(page['html_content'])
-            except Exception:
-                with open(os.path.join(output_dir, page['filename']), 'w', encoding='utf-8') as f:
-                    f.write(page['html_content'])
+            # html页面用UTF-8写盘（QTextEdit.toHtml()输出就是UTF-8编码的HTML）
+            with open(os.path.join(output_dir, page['filename']), 'w', encoding='utf-8') as f:
+                f.write(page['html_content'])
         # 复制图片资源
         for img_name, src_path in self.images.items():
             try:
