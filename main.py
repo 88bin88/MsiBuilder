@@ -187,9 +187,9 @@ class ChmBuilder:
 
         files_lines = ""
         for page in self.pages:
-            files_lines += f"{page['filename']}\\n"
+            files_lines += f"{page['filename']}\n"
         for img_name in self.images:
-            files_lines += f"{img_name}\\n"
+            files_lines += f"{img_name}\n"
 
         hhp_content = f'''[OPTIONS]
 Compatibility=1.1 or later
@@ -206,7 +206,7 @@ Language=0x804 中文(简体)
 [MAP]
 '''
         for i, page in enumerate(self.pages):
-            hhp_content += f"IDH_{i+1}=0{i+1:04d}\\n"
+            hhp_content += f"IDH_{i+1}=0{i+1:04d}\n"
 
         hhp_path = os.path.join(output_dir, f"{chm_name}.hhp")
         with open(hhp_path, 'w', encoding='gbk') as f:
@@ -224,11 +224,11 @@ Language=0x804 中文(简体)
 <UL>
 '''
         for page in self.pages:
-            hhc_content += f'  <LI><OBJECT type="text/sitemap">\\n'
-            hhc_content += f'    <param name="Name" value="{page["title"]}">\\n'
-            hhc_content += f'    <param name="Local" value="{page["filename"]}">\\n'
-            hhc_content += f'  </OBJECT>\\n'
-        hhc_content += '</UL>\\n</BODY>\\n</HTML>'
+            hhc_content += f'  <LI><OBJECT type="text/sitemap">\n'
+            hhc_content += f'    <param name="Name" value="{page["title"]}">\n'
+            hhc_content += f'    <param name="Local" value="{page["filename"]}">\n'
+            hhc_content += f'  </OBJECT>\n'
+        hhc_content += '</UL>\n</BODY>\n</HTML>'
 
         hhc_path = os.path.join(output_dir, f"{chm_name}.hhc")
         with open(hhc_path, 'w', encoding='gbk') as f:
@@ -244,11 +244,11 @@ Language=0x804 中文(简体)
             raise FileNotFoundError(f"找不到hhc.exe: {hhc_exe}")
         result = subprocess.run(
             [hhc_exe, hhp_path],
-            capture_output=True, text=True, cwd=output_dir
+            capture_output=True, text=True, encoding='gbk', errors='replace', cwd=output_dir
         )
         chm_output = os.path.join(output_dir, f"{chm_name}.chm")
         if not os.path.exists(chm_output):
-            raise RuntimeError(f"CHM编译失败:\\n{result.stdout}\\n{result.stderr}")
+            raise RuntimeError(f"CHM编译失败:\n{result.stdout}\n{result.stderr}")
         return chm_output
 
 
@@ -551,7 +551,7 @@ class MsiBuilderApp(QMainWindow):
             if os.path.exists(work_dir):
                 shutil.rmtree(work_dir, ignore_errors=True)
             os.makedirs(work_dir, exist_ok=True)
-            result_chm = self.chm_builder.build_chm(str(work_dir), zip_path.stem.replace('_CHM', 'help'))
+            result_chm = self.chm_builder.build_chm(str(work_dir), "help")
             # 把work_dir里所有文件打成zip
             with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zf:
                 for fname in os.listdir(work_dir):

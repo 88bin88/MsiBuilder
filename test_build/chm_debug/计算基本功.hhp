@@ -1,0 +1,14 @@
+[OPTIONS]
+Compatibility=1.1 or later
+Compiled file=计算基本功.chm
+Contents file=计算基本功.hhc
+Default topic=page_1.htm
+Display compile progress=Yes
+Full-text search=Yes
+Language=0x804 中文(简体)
+
+[FILES]
+page_1.htm\n[INFOTYPES]
+
+[MAP]
+IDH_1=00001\n
