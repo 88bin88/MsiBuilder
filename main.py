@@ -534,30 +534,39 @@ class MsiBuilderApp(QMainWindow):
             if not self.chm_builder.pages:
                 QMessageBox.information(self, '提示', '请先添加CHM页面')
                 return
-            default_name = (self.edit_product_name.text().strip() or 'help') + '.chm'
+            import zipfile
+            default_name = (self.edit_product_name.text().strip() or 'help') + '_CHM.zip'
             desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
             save_path, _ = QFileDialog.getSaveFileName(
-                self, '保存CHM帮助文档',
+                self, '保存CHM打包(zip内含chm成品+hhp工程+hhc目录+html+图片)',
                 os.path.join(desktop, default_name),
-                'CHM帮助文件 (*.chm)')
+                'CHM打包 (*.zip)')
             if not save_path:
                 return
-            chm_path = Path(save_path)
-            work_dir = chm_path.parent / (chm_path.stem + '_chm_build')
+            if not save_path.lower().endswith('.zip'):
+                save_path += '.zip'
+            zip_path = Path(save_path)
+            work_dir = zip_path.parent / (zip_path.stem + '_chm_build_tmp')
             if os.path.exists(work_dir):
                 shutil.rmtree(work_dir, ignore_errors=True)
             os.makedirs(work_dir, exist_ok=True)
-            result_chm = self.chm_builder.build_chm(str(work_dir), chm_path.stem)
-            shutil.copy2(result_chm, str(chm_path))
-            self.log(f'CHM已保存: {chm_path}')
+            result_chm = self.chm_builder.build_chm(str(work_dir), zip_path.stem.replace('_CHM', 'help'))
+            # 把work_dir里所有文件打成zip
+            with zipfile.ZipFile(str(zip_path), 'w', zipfile.ZIP_DEFLATED) as zf:
+                for fname in os.listdir(work_dir):
+                    fpath = os.path.join(work_dir, fname)
+                    if os.path.isfile(fpath):
+                        zf.write(fpath, arcname=fname)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            self.log(f'CHM打包完成: {zip_path}')
             QMessageBox.information(
                 self, "成功",
-                "CHM已保存到:\n" + str(chm_path) + "\n\n双击即可打开查看效果。")
-            os.startfile(str(chm_path.parent))
+                "CHM打包完成:\n" + str(zip_path) +
+                "\n\nzip内含: chm成品 + hhp工程文件 + hhc目录 + html页面 + 图片。")
+            os.startfile(str(zip_path.parent))
         except Exception as e:
-            self.log(f'CHM编译失败: {str(e)}')
-            QMessageBox.warning(self, '编译失败', str(e))
-
+            self.log(f"CHM编译失败: {str(e)}")
+            QMessageBox.warning(self, "编译失败", str(e))
 
     def add_bundle_msi(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "选择MSI文件", "", "MSI安装包 (*.msi)")
