@@ -303,6 +303,15 @@ class MsiBuilderApp(QMainWindow):
         layout_banner.addWidget(btn_select_banner)
         layout_banner.addStretch()
         layout_info.addWidget(group_banner)
+
+        # 许可协议（声明）编辑框
+        group_license = QGroupBox("许可协议 / 声明（安装向导会显示此页，留空则不显示）")
+        layout_license = QVBoxLayout(group_license)
+        self.edit_license = QTextEdit()
+        self.edit_license.setPlaceholderText("在此输入许可协议或声明文本，例如：\n一、授权范围\n二、免责声明\n三、...")
+        self.edit_license.setMaximumHeight(140)
+        layout_license.addWidget(self.edit_license)
+        layout_info.addWidget(group_license)
         layout_info.addStretch()
 
         # 第2页：文件导入
@@ -589,6 +598,19 @@ class MsiBuilderApp(QMainWindow):
                         '<WixLocalization Culture="zh-CN" Codepage="936" '
                         'xmlns="http://schemas.microsoft.com/wix/2006/localization">\n'
                         '</WixLocalization>\n')
+
+            # 写许可协议 rtf（GBK字节转义）
+            license_text = self.edit_license.toPlainText().strip()
+            if license_text:
+                rtf_lines = []
+                for line in license_text.replace('\r', '').split('\n'):
+                    hexs = ''.join("\\'" + format(b, '02x') for b in line.encode('gbk', errors='replace'))
+                    rtf_lines.append(hexs + '\\par ')
+                rtf_body = ''.join(rtf_lines)
+                rtf = '{\\rtf1\\ansi\\ansicpg936\\deff0{\\fonttbl{\\f0\\fnil\\fcharset134 SimSun;}}\\fs18 ' + rtf_body + '}'
+                with open(work_dir / 'license.rtf', 'w', encoding='ascii') as rf:
+                    rf.write(rtf)
+                self.log('已写入许可协议 license.rtf')
             candle_exe = get_resource_path(os.path.join("wix", "candle.exe"))
             light_exe = get_resource_path(os.path.join("wix", "light.exe"))
             self.log("运行 candle 编译 bundle...")
@@ -704,7 +726,7 @@ class MsiBuilderApp(QMainWindow):
 
             wixobj_path = work_dir / "product.wixobj"
             self.log("运行 light 链接...")
-            light_cmd = [light_exe, "-ext", "WixUIExtension", "-loc", str(wxl_path), str(wixobj_path), "-o", str(msi_path)]
+            light_cmd = [light_exe, "-ext", "WixUIExtension", "-loc", str(wxl_path), "-cultures:zh-CN", str(wixobj_path), "-o", str(msi_path)]
             ret2 = subprocess.run(light_cmd, capture_output=True, text=True, cwd=str(work_dir))
             self.log(ret2.stdout)
             if ret2.returncode != 0:
@@ -749,13 +771,17 @@ class MsiBuilderApp(QMainWindow):
     <WixVariable Id="WixUIDialogBmp" Value="{self.banner_image_path}" />
 '''
 
+        license_xml = ""
+        if self.edit_license.toPlainText().strip():
+            license_xml = '\n    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />\n'
+
         wxs = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="{product_code}" Name="{product_name}" Language="2052" Version="{version}" Manufacturer="{manufacturer}" UpgradeCode="{upgrade_code}" Codepage="936">
     <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
     <MajorUpgrade DowngradeErrorMessage="已安装更新版本的{product_name}。" />
     <MediaTemplate />
-{banner_xml}
+{banner_xml}{license_xml}
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">
         <Directory Id="INSTALLFOLDER" Name="{product_name}" />
