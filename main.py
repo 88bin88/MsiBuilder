@@ -599,18 +599,6 @@ class MsiBuilderApp(QMainWindow):
                         'xmlns="http://schemas.microsoft.com/wix/2006/localization">\n'
                         '</WixLocalization>\n')
 
-            # 写许可协议 rtf（GBK字节转义）
-            license_text = self.edit_license.toPlainText().strip()
-            if license_text:
-                rtf_lines = []
-                for line in license_text.replace('\r', '').split('\n'):
-                    hexs = ''.join("\\'" + format(b, '02x') for b in line.encode('gbk', errors='replace'))
-                    rtf_lines.append(hexs + '\\par ')
-                rtf_body = ''.join(rtf_lines)
-                rtf = '{\\rtf1\\ansi\\ansicpg936\\deff0{\\fonttbl{\\f0\\fnil\\fcharset134 SimSun;}}\\fs18 ' + rtf_body + '}'
-                with open(work_dir / 'license.rtf', 'w', encoding='ascii') as rf:
-                    rf.write(rtf)
-                self.log('已写入许可协议 license.rtf')
             candle_exe = get_resource_path(os.path.join("wix", "candle.exe"))
             light_exe = get_resource_path(os.path.join("wix", "light.exe"))
             self.log("运行 candle 编译 bundle...")
@@ -706,6 +694,19 @@ class MsiBuilderApp(QMainWindow):
                         '<WixLocalization Culture="zh-CN" Codepage="936" '
                         'xmlns="http://schemas.microsoft.com/wix/2006/localization">\n'
                         '</WixLocalization>\n')
+
+            # 写许可协议 rtf（GBK字节转义）
+            license_text = self.edit_license.toPlainText().strip()
+            if license_text:
+                rtf_lines = []
+                for line in license_text.replace('\r', '').split('\n'):
+                    hexs = ''.join("\\'" + format(b, '02x') for b in line.encode('gbk', errors='replace'))
+                    rtf_lines.append(hexs + '\\par ')
+                rtf_body = ''.join(rtf_lines)
+                rtf = '{\\rtf1\\ansi\\ansicpg936\\deff0{\\fonttbl{\\f0\\fnil\\fcharset134 SimSun;}}\\fs18 ' + rtf_body + '}'
+                with open(work_dir / 'license.rtf', 'w', encoding='ascii') as rf:
+                    rf.write(rtf)
+                self.log('已写入许可协议 license.rtf')
 
             # 调用candle
             candle_exe = get_resource_path(os.path.join("wix", "candle.exe"))

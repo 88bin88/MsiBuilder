@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="309e06f2-68a3-48a7-ac5e-a729266d9e40" Name="测试软件" Language="2052" Version="1.0.0.0" Manufacturer="测试公司" UpgradeCode="2bd73ff1-aca5-4213-b4e0-e89504fc1f83" Codepage="936">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的测试软件。" />
+    <MediaTemplate />
+
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="测试软件" />
+      </Directory>
+    </Directory>
+
+    <Feature Id="ProductFeature" Title="测试软件" Level="1">
+
+    </Feature>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+
+    </ComponentGroup>
+
+    <UI>
+      <UIRef Id="WixUI_FeatureTree" />
+      <UIRef Id="WixUI_ErrorProgressText" />
+    </UI>
+  </Product>
+</Wix>
