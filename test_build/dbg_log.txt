@@ -1,0 +1,17 @@
+===== 开始生成MSI =====
+产品名称: TestApp
+版本: 1.0.0.0
+生成WiX工程文件...
+已写入许可协议 license.rtf
+运行 candle 编译...
+Windows Installer XML Toolset Compiler version 3.14.1.8722
+Copyright (c) .NET Foundation and contributors. All rights reserved.
+
+product.wxs
+
+运行 light 链接...
+Windows Installer XML Toolset Linker version 3.14.1.8722
+Copyright (c) .NET Foundation and contributors. All rights reserved.
+
+
+===== MSI生成成功 =====

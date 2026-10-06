@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">
+  <Bundle Name="测试捆绑包" Version="1.0.0.0" Manufacturer="测试公司" UpgradeCode="22222222-3333-4444-5555-666666666666">
+    <WixVariable Id="WixStdbaLicenseUrl" Value="https://example.com/license.html" />
+    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.HyperlinkLicense" />
+    <Chain>
+      <MsiPackage SourceFile="test_ui.msi" />
+    </Chain>
+  </Bundle>
+</Wix>
