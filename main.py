@@ -172,9 +172,17 @@ class ChmBuilder:
         # 生成.hhp工程文件、html文件，并复制图片进工程目录
         os.makedirs(output_dir, exist_ok=True)
         for page in self.pages:
-            # html页面用UTF-8写盘（QTextEdit.toHtml()输出就是UTF-8编码的HTML）
-            with open(os.path.join(output_dir, page['filename']), 'w', encoding='utf-8') as f:
-                f.write(page['html_content'])
+            # html页面用GBK写盘（hh.exe老程序按ANSI/GBK读，title和body都正常）
+            html = page['html_content']
+            title = page.get('title', '')
+            if re.search(r'<title>.*?</title>', html, re.IGNORECASE | re.DOTALL):
+                html = re.sub(r'<title>.*?</title>', f'<title>{title}</title>', html, count=1, flags=re.IGNORECASE | re.DOTALL)
+            else:
+                html = html.replace('</head>', f'<title>{title}</title></head>', 1)
+            # 把charset声明改成GBK，和写盘编码一致
+            html = html.replace('charset=UTF-8', 'charset=GBK').replace('charset=utf-8', 'charset=GBK')
+            with open(os.path.join(output_dir, page['filename']), 'w', encoding='gbk', errors='replace') as f:
+                f.write(html)
         # 复制图片资源
         for img_name, src_path in self.images.items():
             try:
