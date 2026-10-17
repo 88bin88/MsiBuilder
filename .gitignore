@@ -25,3 +25,7 @@ error*.png
 
 # 工程文件
 *.myproj
+
+# 临时补丁脚本和备份
+fix_*.py
+*.bak_v*
