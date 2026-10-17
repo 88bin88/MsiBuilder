@@ -161,12 +161,44 @@ class ChmBuilder:
     def __init__(self):
         self.pages = []  # list of {title, filename, html_content}
         self.images = {}  # img_name -> 源文件路径，编译时复制进工程目录
+        self.tree = []  # 多级目录树: [{type:'folder',title,children:[...]},{type:'page',title,filename}]
+        self._page_counter = 0  # 页面文件计数器（删除页面后也不撞名）
 
     def add_page(self, title: str, html_content: str = None):
-        filename = f"page_{len(self.pages)+1}.htm"
+        self._page_counter += 1
+        filename = f"page_{self._page_counter}.htm"
         if html_content is None:
-            html_content = f"<html><head><title>{title}</title></head><body><h1>{title}</h1></body></html>"
+            html_content = f'<html><head><meta charset="UTF-8"><title>{title}</title></head><body><h1>{title}</h1></body></html>'
         self.pages.append({'title': title, 'filename': filename, 'html_content': html_content})
+        return len(self.pages) - 1
+
+    def add_folder(self, title: str, parent: dict = None):
+        """添加目录节点（支持多级嵌套）"""
+        node = {'type': 'folder', 'title': title, 'children': []}
+        if parent is not None:
+            parent.setdefault('children', []).append(node)
+        else:
+            self.tree.append(node)
+        return node
+
+    def _find_page(self, filename: str):
+        for p in self.pages:
+            if p['filename'] == filename:
+                return p
+        return None
+
+    def _find_first_page(self, nodes=None):
+        """递归找第一个页面节点（用于窗口标题和默认主题）"""
+        if nodes is None:
+            nodes = self.tree
+        for node in nodes:
+            if node['type'] == 'page':
+                return node
+            if node['type'] == 'folder':
+                found = self._find_first_page(node.get('children', []))
+                if found:
+                    return found
+        return None
 
     def generate_project_files(self, output_dir: str, chm_name: str):
         # 生成.hhp工程文件、html文件，并复制图片进工程目录
@@ -188,12 +220,19 @@ class ChmBuilder:
         for img_name in self.images:
             files_lines += f"{img_name}\n"
 
-        window_title = self.pages[0]["title"] if self.pages else chm_name
+        first_node = self._find_first_page()
+        if first_node:
+            first_page = self._find_page(first_node['filename'])
+            window_title = first_page['title'] if first_page else chm_name
+            default_topic = first_node['filename']
+        else:
+            window_title = self.pages[0]["title"] if self.pages else chm_name
+            default_topic = self.pages[0]["filename"] if self.pages else "index.htm"
         hhp_content = f'''[OPTIONS]
 Compatibility=1.1 or later
 Compiled file={chm_name}.chm
 Contents file={chm_name}.hhc
-Default topic={self.pages[0]["filename"] if self.pages else "index.htm"}
+Default topic={default_topic}
 Display compile progress=Yes
 Full-text search=Yes
 Language=0x804 中文(简体)
@@ -222,11 +261,15 @@ Title={window_title}
 </OBJECT>
 <UL>
 '''
-        for page in self.pages:
-            hhc_content += f'  <LI><OBJECT type="text/sitemap">\n'
-            hhc_content += f'    <param name="Name" value="{page["title"]}">\n'
-            hhc_content += f'    <param name="Local" value="{page["filename"]}">\n'
-            hhc_content += f'  </OBJECT>\n'
+        if not self.tree:
+            # 兼容旧数据：无目录树时按扁平列表生成
+            for page in self.pages:
+                hhc_content += f'  <LI><OBJECT type="text/sitemap">\n'
+                hhc_content += f'    <param name="Name" value="{page["title"]}">\n'
+                hhc_content += f'    <param name="Local" value="{page["filename"]}">\n'
+                hhc_content += f'  </OBJECT>\n'
+        else:
+            hhc_content += self._hhc_tree_content()
         hhc_content += '</UL>\n</BODY>\n</HTML>'
 
         hhc_path = os.path.join(output_dir, f"{chm_name}.hhc")
@@ -234,6 +277,34 @@ Title={window_title}
             f.write(hhc_content)
 
         return hhp_path
+
+    def _hhc_tree_content(self, nodes=None, indent=1):
+        """递归生成多级目录树对应的hhc HTML片段"""
+        if nodes is None:
+            nodes = self.tree
+        pad = '  ' * indent
+        lines = []
+        for node in nodes:
+            if node['type'] == 'folder':
+                lines.append(f'{pad}<LI> <OBJECT type="text/sitemap">')
+                lines.append(f'{pad}  <param name="Name" value="{node["title"]}">')
+                lines.append(f'{pad}</OBJECT>')
+                children = node.get('children', [])
+                if children:
+                    lines.append(f'{pad}<UL>')
+                    sub = self._hhc_tree_content(children, indent + 1)
+                    if sub:
+                        lines.extend(sub.split('\n'))
+                    lines.append(f'{pad}</UL>')
+            else:
+                page = self._find_page(node['filename'])
+                if page is None:
+                    continue
+                lines.append(f'{pad}<LI> <OBJECT type="text/sitemap">')
+                lines.append(f'{pad}  <param name="Name" value="{node["title"]}">')
+                lines.append(f'{pad}  <param name="Local" value="{page["filename"]}">')
+                lines.append(f'{pad}</OBJECT>')
+        return '\n'.join(lines)
 
     def build_chm(self, output_dir: str, chm_name: str):
         # 调用hhc.exe编译chm
@@ -343,7 +414,9 @@ class MsiBuilderApp(QMainWindow):
         chm_top_layout = QHBoxLayout()
         btn_add_chm_page = QPushButton("添加CHM页面")
         btn_add_chm_page.clicked.connect(self.add_chm_page)
-        btn_del_chm_page = QPushButton("删除选中页面")
+        btn_add_chm_folder = QPushButton("添加子目录")
+        btn_add_chm_folder.clicked.connect(self.add_chm_folder)
+        btn_del_chm_page = QPushButton("删除选中节点")
         btn_del_chm_page.clicked.connect(self.remove_chm_page)
         btn_insert_chm_image = QPushButton("插入图片")
         btn_insert_chm_image.clicked.connect(self.insert_chm_image)
@@ -352,6 +425,7 @@ class MsiBuilderApp(QMainWindow):
         btn_compile_chm.clicked.connect(self.compile_chm_test)
         self.checkbox_include_chm = QCheckBox("将CHM打包进MSI")
         chm_top_layout.addWidget(btn_add_chm_page)
+        chm_top_layout.addWidget(btn_add_chm_folder)
         chm_top_layout.addWidget(btn_del_chm_page)
         chm_top_layout.addWidget(btn_insert_chm_image)
         chm_top_layout.addWidget(btn_compile_chm)
@@ -360,7 +434,8 @@ class MsiBuilderApp(QMainWindow):
         layout_chm.addLayout(chm_top_layout)
 
         chm_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.list_chm_pages = QListWidget()
+        self.list_chm_pages = QTreeWidget()
+        self.list_chm_pages.setHeaderHidden(True)
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.addWidget(QLabel("页面标题:"))
@@ -375,7 +450,7 @@ class MsiBuilderApp(QMainWindow):
         chm_splitter.addWidget(right_panel)
         chm_splitter.setSizes([260, 640])
         layout_chm.addWidget(chm_splitter)
-        self.list_chm_pages.currentRowChanged.connect(self.on_chm_page_changed)
+        self.list_chm_pages.currentItemChanged.connect(self.on_chm_page_changed)
 
         # 添加所有标签页
         self.tabs.addTab(tab_info, "产品信息")
@@ -467,25 +542,87 @@ class MsiBuilderApp(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "REG解析失败", f"文件: {reg_path}\n错误: {str(e)}")
 
+    def _sync_tree_from_widget(self):
+        """从QTreeWidget重建ChmBuilder.tree（目录树唯一同步入口）"""
+        def build(node_item):
+            ntype = node_item.data(0, Qt.ItemDataRole.UserRole)
+            title = node_item.text(0)
+            if ntype == 'folder':
+                return {'type': 'folder', 'title': title,
+                        'children': [build(node_item.child(i)) for i in range(node_item.childCount())]}
+            return {'type': 'page', 'title': title,
+                    'filename': node_item.data(0, Qt.ItemDataRole.UserRole + 1)}
+        self.chm_builder.tree = [
+            build(self.list_chm_pages.topLevelItem(i))
+            for i in range(self.list_chm_pages.topLevelItemCount())
+        ]
+
+    def _find_chm_page_by_filename(self, filename):
+        for p in self.chm_builder.pages:
+            if p['filename'] == filename:
+                return p
+        return None
+
+    def _chm_item_parent(self):
+        """返回新节点应挂载的父item（选中目录挂它下，选中页面挂它父级，无选中挂根）"""
+        current = self.list_chm_pages.currentItem()
+        if current is not None:
+            if current.data(0, Qt.ItemDataRole.UserRole) == 'folder':
+                return current
+            p = current.parent()
+            if p is not None:
+                return p
+        return None
+
     def add_chm_page(self):
         title, ok = QInputDialog.getText(self, "添加CHM页面", "页面标题:")
         if ok and title:
             self.save_current_chm_page()
-            self.chm_builder.add_page(title)
-            self.list_chm_pages.addItem(title)
-            self.list_chm_pages.setCurrentRow(self.list_chm_pages.count() - 1)
+            page_index = self.chm_builder.add_page(title)
+            filename = self.chm_builder.pages[page_index]['filename']
+            item = QTreeWidgetItem([title])
+            item.setData(0, Qt.ItemDataRole.UserRole, 'page')
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, filename)
+            parent = self._chm_item_parent()
+            if parent is not None:
+                parent.addChild(item)
+            else:
+                self.list_chm_pages.addTopLevelItem(item)
+            self.list_chm_pages.setCurrentItem(item)
+            self._sync_tree_from_widget()
             self.log(f"添加CHM页面: {title}")
 
-    def on_chm_page_changed(self, row):
-        if row < 0 or row >= len(self.chm_builder.pages):
-            self.edit_chm_title.blockSignals(True)
-            self.edit_chm_title.clear()
-            self.edit_chm_title.blockSignals(False)
-            self.edit_chm_body.blockSignals(True)
-            self.edit_chm_body.clear()
-            self.edit_chm_body.blockSignals(False)
+    def add_chm_folder(self):
+        title, ok = QInputDialog.getText(self, "添加子目录", "目录名称:")
+        if ok and title:
+            self.save_current_chm_page()
+            item = QTreeWidgetItem([title])
+            item.setData(0, Qt.ItemDataRole.UserRole, 'folder')
+            parent = self._chm_item_parent()
+            if parent is not None:
+                parent.addChild(item)
+            else:
+                self.list_chm_pages.addTopLevelItem(item)
+            self.list_chm_pages.setCurrentItem(item)
+            self._sync_tree_from_widget()
+            self.log(f"添加子目录: {title}")
+
+    def on_chm_page_changed(self, item, prev_item=None):
+        self.edit_chm_title.blockSignals(True)
+        self.edit_chm_title.clear()
+        self.edit_chm_title.blockSignals(False)
+        self.edit_chm_body.blockSignals(True)
+        self.edit_chm_body.clear()
+        self.edit_chm_body.blockSignals(False)
+        if item is None:
             return
-        page = self.chm_builder.pages[row]
+        if item.data(0, Qt.ItemDataRole.UserRole) == 'folder':
+            self.edit_chm_title.setPlaceholderText("（这是目录，不能编辑正文）")
+            return
+        filename = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        page = self._find_chm_page_by_filename(filename)
+        if page is None:
+            return
         self.edit_chm_title.blockSignals(True)
         self.edit_chm_title.setText(page['title'])
         self.edit_chm_title.blockSignals(False)
@@ -494,29 +631,49 @@ class MsiBuilderApp(QMainWindow):
         self.edit_chm_body.blockSignals(False)
 
     def save_current_chm_page(self):
-        row = self.list_chm_pages.currentRow()
-        if row < 0 or row >= len(self.chm_builder.pages):
+        item = self.list_chm_pages.currentItem()
+        if item is None or item.data(0, Qt.ItemDataRole.UserRole) != 'page':
+            return
+        filename = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        page = self._find_chm_page_by_filename(filename)
+        if page is None:
             return
         title = self.edit_chm_title.text().strip()
         if not title:
-            title = self.chm_builder.pages[row]['title']
-        self.chm_builder.pages[row]['title'] = title
-        self.chm_builder.pages[row]['html_content'] = self.edit_chm_body.toHtml()
-        item = self.list_chm_pages.currentItem()
-        if item is not None:
-            item.setText(title)
+            title = page['title']
+        page['title'] = title
+        page['html_content'] = self.edit_chm_body.toHtml()
+        item.setText(0, title)
+        self._sync_tree_from_widget()
 
     def remove_chm_page(self):
-        row = self.list_chm_pages.currentRow()
-        if row < 0:
+        item = self.list_chm_pages.currentItem()
+        if item is None:
             return
-        title = self.chm_builder.pages[row]['title']
-        del self.chm_builder.pages[row]
-        self.list_chm_pages.takeItem(row)
-        self.log(f"已删除CHM页面: {title}")
+        title = item.text(0)
+        # 递归收集该节点下所有页面filename
+        filenames = []
+        def collect(i):
+            if i.data(0, Qt.ItemDataRole.UserRole) == 'page':
+                filenames.append(i.data(0, Qt.ItemDataRole.UserRole + 1))
+            for c in range(i.childCount()):
+                collect(i.child(c))
+        collect(item)
+        self.chm_builder.pages = [
+            p for p in self.chm_builder.pages if p['filename'] not in filenames
+        ]
+        parent = item.parent()
+        if parent is not None:
+            parent.removeChild(item)
+        else:
+            idx = self.list_chm_pages.indexOfTopLevelItem(item)
+            self.list_chm_pages.takeTopLevelItem(idx)
+        self._sync_tree_from_widget()
+        self.log(f"已删除CHM节点: {title}")
 
     def insert_chm_image(self):
-        if self.list_chm_pages.currentRow() < 0:
+        item = self.list_chm_pages.currentItem()
+        if item is None or item.data(0, Qt.ItemDataRole.UserRole) != 'page':
             QMessageBox.information(self, "提示", "请先添加并选中一个CHM页面")
             return
         path, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp)")
