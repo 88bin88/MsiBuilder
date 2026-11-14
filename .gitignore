@@ -29,3 +29,6 @@ error*.png
 # 临时补丁脚本和备份
 fix_*.py
 *.bak_v*
+
+# 自解压启动器（随仓库分发，保证可直接打包）
+!stub/msi_stub.exe

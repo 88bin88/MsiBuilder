@@ -4,6 +4,7 @@ import re
 import subprocess
 import uuid
 import shutil
+import struct
 import tempfile
 from xml.sax.saxutils import escape as xml_escape
 from pathlib import Path
@@ -500,7 +501,7 @@ class MsiBuilderApp(QMainWindow):
         btn_gen_msi = QPushButton("生成MSI安装包")
         btn_gen_msi.setStyleSheet("font-size: 14px; padding: 8px; background-color: #4CAF50; color: white;")
         btn_gen_msi.clicked.connect(self.generate_msi)
-        self.checkbox_also_exe = QCheckBox("同时生成 EXE（把 MSI 直接打包成 EXE，一步到位）")
+        self.checkbox_also_exe = QCheckBox("同时生成 EXE（内嵌 MSI，安装界面与 MSI 完全一致）")
         bottom_btn_layout.addWidget(btn_gen_msi, 1)
         bottom_btn_layout.addWidget(self.checkbox_also_exe)
         main_layout.addLayout(bottom_btn_layout)
@@ -814,6 +815,24 @@ class MsiBuilderApp(QMainWindow):
             raise RuntimeError("light失败:\nSTDOUT:\n" + (ret2.stdout or "") + "\nSTDERR:\n" + (ret2.stderr or ""))
         return exe_path
 
+    def _build_selfextract_exe(self, msi_path, exe_path):
+        """把 MSI 内嵌进自解压 EXE：双击后弹出与双击 MSI 完全一致的原生安装向导"""
+        stub_path = get_resource_path(os.path.join("stub", "msi_stub.exe"))
+        if not os.path.exists(stub_path):
+            raise FileNotFoundError(
+                "找不到内嵌启动器 stub: " + stub_path +
+                "\n请确认打包时包含 --add-data \"stub;stub\"")
+        stub_size = os.path.getsize(stub_path)
+        msi_size = os.path.getsize(str(msi_path))
+        shutil.copyfile(stub_path, str(exe_path))
+        with open(str(exe_path), "ab") as out_f:
+            with open(str(msi_path), "rb") as src_f:
+                shutil.copyfileobj(src_f, out_f)
+            # 尾部索引：magic(8) + 数据偏移(8) + 数据长度(8)
+            out_f.write(b"MSI2EXE!" + struct.pack("<qq", stub_size, msi_size))
+        self.log("EXE 已内嵌 MSI: 启动器 %d 字节 + MSI %d 字节" % (stub_size, msi_size))
+        return exe_path
+
     def convert_msi_to_exe(self):
         """把现有 MSI 文件单独打包成 EXE"""
         # 优先取捆绑列表里选中的 MSI，否则弹文件选择框
@@ -843,11 +862,13 @@ class MsiBuilderApp(QMainWindow):
         try:
             self.log("===== 开始把 MSI 打包成 EXE =====")
             self.log("源 MSI: " + msi_src)
-            self._build_bundle_exe([msi_src], str(exe_path),
-                                   product_name + " 安装程序", version, manufacturer, work_dir)
-            shutil.rmtree(work_dir, ignore_errors=True)
+            self._build_selfextract_exe(msi_src, str(exe_path))
             self.log("EXE 生成完成: " + str(exe_path))
-            QMessageBox.information(self, "成功", "EXE 生成完成！\n" + str(exe_path))
+            QMessageBox.information(
+                self, "成功",
+                "EXE 生成完成！\n" + str(exe_path) +
+                "\n\n双击该 EXE 会弹出与双击 MSI 完全一致的安装向导，"
+                "安装过程使用系统 Windows Installer（msiexec）引擎。")
             os.startfile(str(exe_path.parent))
         except Exception as e:
             self.log("错误: " + str(e))
@@ -1020,11 +1041,7 @@ class MsiBuilderApp(QMainWindow):
                 try:
                     self.log("正在把 MSI 打包成 EXE ...")
                     exe_path = msi_path.with_suffix('.exe')
-                    exe_work = msi_path.parent / (msi_path.stem + "_exe_build")
-                    self._build_bundle_exe(
-                        [str(msi_path)], str(exe_path),
-                        product_name + " 安装程序", product_version, manufacturer, exe_work)
-                    shutil.rmtree(exe_work, ignore_errors=True)
+                    self._build_selfextract_exe(str(msi_path), str(exe_path))
                     self.log("EXE 生成完成: " + str(exe_path))
                     extra_msg = "\n\nEXE 生成完成！\n" + str(exe_path)
                 except Exception as ex:
