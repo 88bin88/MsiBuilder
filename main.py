@@ -16,6 +16,14 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QPushButton,
 from PyQt6.QtCore import Qt, QDir
 from PyQt6.QtGui import QPixmap
 
+def normalize_bundle_version(version: str) -> str:
+    """Burn Bundle 的 Version 必须是 x.x.x.x 四段格式"""
+    parts = [x for x in re.split(r'[.\-_]', str(version).strip()) if x.isdigit()]
+    while len(parts) < 4:
+        parts.append('0')
+    return '.'.join(parts[:4])
+
+
 def get_resource_path(relative_path: str) -> str:
     """兼容源码运行 / PyInstaller打包后的资源路径"""
     if hasattr(sys, '_MEIPASS'):
@@ -471,20 +479,31 @@ class MsiBuilderApp(QMainWindow):
         bundle_btn_layout.addStretch()
         layout_bundle.addLayout(bundle_btn_layout)
         self.list_bundle_msi = QListWidget()
-        layout_bundle.addWidget(QLabel("捆绑列表（安装时按顺序安装）:"))
+        layout_bundle.addWidget(QLabel("MSI列表（单个 = 转成 EXE；多个 = 捆绑安装，按顺序安装）:"))
         layout_bundle.addWidget(self.list_bundle_msi)
+        bundle_actions = QHBoxLayout()
+        btn_msi_to_exe = QPushButton("MSI 转 EXE（单个）")
+        btn_msi_to_exe.setStyleSheet("font-size: 13px; padding: 6px; background-color: #607D8B; color: white;")
+        btn_msi_to_exe.clicked.connect(self.convert_msi_to_exe)
         btn_gen_bundle = QPushButton("生成捆绑安装包 (exe)")
         btn_gen_bundle.setStyleSheet("font-size: 13px; padding: 6px; background-color: #2196F3; color: white;")
         btn_gen_bundle.clicked.connect(self.generate_bundle)
-        layout_bundle.addWidget(btn_gen_bundle)
+        bundle_actions.addWidget(btn_msi_to_exe)
+        bundle_actions.addWidget(btn_gen_bundle)
+        bundle_actions.addStretch()
+        layout_bundle.addLayout(bundle_actions)
 
         self.tabs.addTab(tab_bundle, "捆绑包")
 
-        # 底部：生成MSI按钮和日志
+        # 底部：生成MSI按钮、同时生成EXE选项和日志
+        bottom_btn_layout = QHBoxLayout()
         btn_gen_msi = QPushButton("生成MSI安装包")
         btn_gen_msi.setStyleSheet("font-size: 14px; padding: 8px; background-color: #4CAF50; color: white;")
         btn_gen_msi.clicked.connect(self.generate_msi)
-        main_layout.addWidget(btn_gen_msi)
+        self.checkbox_also_exe = QCheckBox("同时生成 EXE（把 MSI 直接打包成 EXE，一步到位）")
+        bottom_btn_layout.addWidget(btn_gen_msi, 1)
+        bottom_btn_layout.addWidget(self.checkbox_also_exe)
+        main_layout.addLayout(bottom_btn_layout)
 
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
@@ -738,6 +757,102 @@ class MsiBuilderApp(QMainWindow):
             self.list_bundle_msi.takeItem(self.list_bundle_msi.row(item))
             self.log("已移除选中项")
 
+    def _build_bundle_exe(self, msi_list, exe_path, bundle_name, version, manufacturer, work_dir):
+        """底层通用方法：用 WiX Burn 把 MSI 打包成 EXE"""
+        work_dir = Path(work_dir)
+        if work_dir.exists():
+            shutil.rmtree(work_dir, ignore_errors=True)
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        upgrade_code = str(uuid.uuid4()).upper()
+        msi_packages = ""
+        for msi in msi_list:
+            msi_packages += '      <MsiPackage SourceFile="' + xml_escape(str(msi)) + '" />\n'
+        wxs = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+               '<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"\n'
+               '     xmlns:bal="http://schemas.microsoft.com/wix/BalExtension">\n'
+               '  <Bundle Name="' + xml_escape(bundle_name) + '" Version="' + normalize_bundle_version(version) + '" Manufacturer="' + xml_escape(manufacturer) + '" UpgradeCode="' + upgrade_code + '">\n'
+               '    <WixVariable Id="WixStdbaLicenseUrl" Value="https://example.com/license.html" />\n'
+               '    <BootstrapperApplicationRef Id="WixStandardBootstrapperApplication.HyperlinkLicense" />\n'
+               '    <Chain>\n' + msi_packages +
+               '    </Chain>\n'
+               '  </Bundle>\n'
+               '</Wix>\n')
+        wxs_path = work_dir / "bundle.wxs"
+        with open(wxs_path, "w", encoding="utf-8") as f:
+            f.write(wxs)
+
+        wxl_path = work_dir / "zh-CN.wxl"
+        with open(wxl_path, "w", encoding="utf-8") as f:
+            f.write('<?xml version="1.0" encoding="utf-8"?>\n'
+                    '<WixLocalization Culture="zh-CN" Codepage="936" '
+                    'xmlns="http://schemas.microsoft.com/wix/2006/localization">\n'
+                    '</WixLocalization>\n')
+
+        candle_exe = get_resource_path(os.path.join("wix", "candle.exe"))
+        light_exe = get_resource_path(os.path.join("wix", "light.exe"))
+        if not os.path.exists(candle_exe):
+            raise FileNotFoundError("找不到内嵌 candle.exe: " + candle_exe)
+
+        self.log("运行 candle 编译 bundle...")
+        ret = subprocess.run([candle_exe, str(wxs_path), "-o", str(work_dir) + "\\"],
+                             capture_output=True, text=True, encoding="gbk", errors="replace",
+                             cwd=str(work_dir))
+        self.log(ret.stdout)
+        if ret.returncode != 0:
+            raise RuntimeError("candle失败:\nSTDOUT:\n" + (ret.stdout or "") + "\nSTDERR:\n" + (ret.stderr or ""))
+
+        wixobj_path = work_dir / "bundle.wixobj"
+        self.log("运行 light 链接 bundle...")
+        ret2 = subprocess.run([light_exe, "-ext", "WixBalExtension", "-ext", "WixUtilExtension",
+                               "-cultures:zh-CN", "-loc", str(wxl_path),
+                               str(wixobj_path), "-o", str(exe_path)],
+                              capture_output=True, text=True, encoding="gbk", errors="replace",
+                              cwd=str(work_dir))
+        self.log(ret2.stdout)
+        if ret2.returncode != 0:
+            raise RuntimeError("light失败:\nSTDOUT:\n" + (ret2.stdout or "") + "\nSTDERR:\n" + (ret2.stderr or ""))
+        return exe_path
+
+    def convert_msi_to_exe(self):
+        """把现有 MSI 文件单独打包成 EXE"""
+        # 优先取捆绑列表里选中的 MSI，否则弹文件选择框
+        selected = self.list_bundle_msi.selectedItems()
+        if selected:
+            msi_src = selected[0].data(Qt.ItemDataRole.UserRole)
+        else:
+            msi_src, _ = QFileDialog.getOpenFileName(
+                self, "选择要转成 EXE 的 MSI 文件", "", "MSI安装包 (*.msi)")
+            if not msi_src:
+                return
+
+        default_exe = os.path.splitext(os.path.basename(msi_src))[0] + ".exe"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, "保存 EXE", default_exe, "可执行安装包 (*.exe)")
+        if not save_path:
+            return
+        if not save_path.lower().endswith(".exe"):
+            save_path += ".exe"
+
+        exe_path = Path(save_path)
+        work_dir = exe_path.parent / (exe_path.stem + "_exe_build")
+        product_name = self.edit_product_name.text().strip() or Path(msi_src).stem
+        version = self.edit_version.text().strip() or "1.0.0"
+        manufacturer = self.edit_manufacturer.text().strip()
+
+        try:
+            self.log("===== 开始把 MSI 打包成 EXE =====")
+            self.log("源 MSI: " + msi_src)
+            self._build_bundle_exe([msi_src], str(exe_path),
+                                   product_name + " 安装程序", version, manufacturer, work_dir)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            self.log("EXE 生成完成: " + str(exe_path))
+            QMessageBox.information(self, "成功", "EXE 生成完成！\n" + str(exe_path))
+            os.startfile(str(exe_path.parent))
+        except Exception as e:
+            self.log("错误: " + str(e))
+            QMessageBox.critical(self, "生成失败", str(e))
+
     def generate_bundle(self):
         if self.list_bundle_msi.count() == 0:
             QMessageBox.warning(self, "提示", "请先添加要捆绑的MSI文件")
@@ -899,7 +1014,24 @@ class MsiBuilderApp(QMainWindow):
             if ret2.returncode != 0:
                 raise RuntimeError(f"light失败:\nSTDOUT:\n{ret2.stdout}\nSTDERR:\n{ret2.stderr}")
 
-            QMessageBox.information(self, "成功", f"MSI生成完成！\n{msi_path}")
+            # 勾选"同时生成EXE"时，把刚生成的MSI再用Burn打包成EXE
+            extra_msg = ""
+            if self.checkbox_also_exe.isChecked():
+                try:
+                    self.log("正在把 MSI 打包成 EXE ...")
+                    exe_path = msi_path.with_suffix('.exe')
+                    exe_work = msi_path.parent / (msi_path.stem + "_exe_build")
+                    self._build_bundle_exe(
+                        [str(msi_path)], str(exe_path),
+                        product_name + " 安装程序", product_version, manufacturer, exe_work)
+                    shutil.rmtree(exe_work, ignore_errors=True)
+                    self.log("EXE 生成完成: " + str(exe_path))
+                    extra_msg = "\n\nEXE 生成完成！\n" + str(exe_path)
+                except Exception as ex:
+                    self.log("EXE生成失败: " + str(ex))
+                    extra_msg = "\n\n注意：MSI 已成功生成，但 EXE 打包失败：\n" + str(ex)
+
+            QMessageBox.information(self, "完成", f"MSI生成完成！\n{msi_path}" + extra_msg)
             self.log("===== MSI生成成功 =====")
 
         except Exception as e:
